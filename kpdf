@@ -1,0 +1,74 @@
+#!/bin/bash
+if [ "$#" -eq 0 ]; then
+  echo "Please specify a filename"
+  exit 2
+elif [ "$#" -eq 2 ]; then
+  DPI=$2
+  echo "Calculating PDF as $DPI dpi"
+else
+  DPI=72
+fi
+
+MYFILE="$1"
+echo "Opening $MYFILE"
+OUTPUTFILE=".kpdf_cache"
+identify "$MYFILE" > ${OUTPUTFILE}
+gs -q -o - -sDEVICE=inkcov "${MYFILE}" >> ${OUTPUTFILE}
+
+echo "Outputs written to $OUTPUTFILE"
+
+l=0
+
+IFS=' ' # space is set as delimiter
+
+MYPDF="PDF";
+LASTPAGE=0
+declare -a PDFINFO
+
+while IFS= read -r line
+do
+  read -ra ADDR <<< "${line/$MYFILE/}" # str is read into an array as tokens separated by IFS
+#  echo ${ADDR[0]}
+  if [[ ${ADDR[1]} == $MYPDF || ${ADDR[0]} == $MYPDF ]]; then
+    # THIS IS PAPER SIZE
+    LASTPAGE=$((LASTPAGE+1))
+#    echo "Page "$((l))
+#    echo "paper="${ADDR[2]}
+    if [ ${ADDR[0]} == $MYPDF ]; then
+      # ONE SIDED PDF FILE
+      W=${ADDR[1]%x*}
+      H=${ADDR[1]#*x}
+    else
+      W=${ADDR[2]%x*}
+      H=${ADDR[2]#*x}
+    fi;
+    W_MM=$(echo "scale=2; ($W/$DPI)*25.4" | bc)
+    H_MM=$(echo "scale=2; ($H/$DPI)*25.4" | bc)
+#    PDFINFO[$((l))]=${ADDR[2]} # UNCOMMENT FOR INCH
+    PDFINFO[$((l))]=$W_MM" x "$H_MM;
+  else
+    #echo "Page "$((l-LASTPAGE))
+    #echo "C="${ADDR[0]}",M="${ADDR[1]}",Y="${ADDR[2]}",K="${ADDR[3]}
+    if [[ ${ADDR[0]} == "0.00000" && ${ADDR[1]} == "0.00000" && ${ADDR[2]} == "0.00000" ]]; then
+      PDFINFO[$((l-LASTPAGE))]+=" (BW)";
+    else
+      PDFINFO[$((l-LASTPAGE))]+=" (COL)";
+    fi;
+  fi
+  l=$((l+1))
+done < ${OUTPUTFILE}
+
+echo "";
+echo "$MYFILE : Overview"
+
+p=0;
+for i in "${PDFINFO[@]}"
+do
+    echo $((p+1)) "=" $i
+    p=$((p+1))
+done
+
+echo "";
+echo "$MYFILE : Summary"
+
+(IFS=$'\n'; sort <<< "${PDFINFO[*]}") | uniq -c
